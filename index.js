@@ -10,10 +10,20 @@ const app = express();
 app.use(express.json());
 const checkJwt = jwt({ secret: "d1f8a9b3c5e7f2a4d6c8b0e5f3a7d2c1b5e8f3a6d9c2b7e4f1a8d3c6b9e5f2a1", algorithms: ["HS256"] });
 
+// Middleware kết hợp: checkJwt và gán req.user = req.auth
+const checkJwtAndUser = [
+  checkJwt,
+  (req, res, next) => {
+    if (!req.user && req.auth) req.user = req.auth;
+    next();
+  }
+];
+
 // Enhanced JWT to Principal mapping with comprehensive banking attributes
 const jwtToPrincipal = (jwtUser) => {
-  // Get additional user data from database
+  console.log('DEBUG jwtToPrincipal - jwtUser:', jwtUser);
   const user = db.users.findOne(jwtUser.sub);
+  console.log('DEBUG jwtToPrincipal - Looking for user id:', jwtUser?.sub, 'Found:', user);
   
   if (!user) {
     throw new Error("User not found in database");
@@ -98,7 +108,7 @@ const prepareResourceObject = (account, additionalAttributes = {}) => {
 // ==================== ACCOUNT READ OPERATIONS ====================
 
 // Read basic account information
-app.get("/accounts/:id/basic", checkJwt, async (req, res) => {
+app.get("/accounts/:id/basic", checkJwtAndUser, async (req, res) => {
   try {
     const account = db.accounts.findOne(req.params.id);
     if (!account) {
@@ -134,7 +144,7 @@ app.get("/accounts/:id/basic", checkJwt, async (req, res) => {
 });
 
 // Read full account details
-app.get("/accounts/:id/details", checkJwt, async (req, res) => {
+app.get("/accounts/:id/details", checkJwtAndUser, async (req, res) => {
   try {
     const account = db.accounts.findOne(req.params.id);
     if (!account) {
@@ -162,7 +172,7 @@ app.get("/accounts/:id/details", checkJwt, async (req, res) => {
 });
 
 // Read transaction history
-app.get("/accounts/:id/transactions", checkJwt, async (req, res) => {
+app.get("/accounts/:id/transactions", checkJwtAndUser, async (req, res) => {
   try {
     const account = db.accounts.findOne(req.params.id);
     if (!account) {
@@ -211,7 +221,7 @@ app.get("/accounts/:id/transactions", checkJwt, async (req, res) => {
 // ==================== ACCOUNT UPDATE OPERATIONS ====================
 
 // Update contact information
-app.patch("/accounts/:id/contact", checkJwt, async (req, res) => {
+app.patch("/accounts/:id/contact", checkJwtAndUser, async (req, res) => {
   try {
     const account = db.accounts.findOne(req.params.id);
     if (!account) {
@@ -248,7 +258,7 @@ app.patch("/accounts/:id/contact", checkJwt, async (req, res) => {
 });
 
 // Credit balance (add money)
-app.post("/accounts/:id/credit", checkJwt, async (req, res) => {
+app.post("/accounts/:id/credit", checkJwtAndUser, async (req, res) => {
   try {
     const { amount } = req.body;
     const account = db.accounts.findOne(req.params.id);
@@ -294,7 +304,7 @@ app.post("/accounts/:id/credit", checkJwt, async (req, res) => {
 });
 
 // Debit balance (subtract money)
-app.post("/accounts/:id/debit", checkJwt, async (req, res) => {
+app.post("/accounts/:id/debit", checkJwtAndUser, async (req, res) => {
   try {
     const { amount } = req.body;
     const account = db.accounts.findOne(req.params.id);
@@ -347,7 +357,7 @@ app.post("/accounts/:id/debit", checkJwt, async (req, res) => {
 // ==================== TRANSFER OPERATIONS ====================
 
 // Small internal transfer (under 5M VND)
-app.post("/accounts/:id/transfer/internal/small", checkJwt, async (req, res) => {
+app.post("/accounts/:id/transfer/internal/small", checkJwtAndUser, async (req, res) => {
   try {
     const { amount, to_account, description } = req.body;
     const account = db.accounts.findOne(req.params.id);
@@ -396,7 +406,7 @@ app.post("/accounts/:id/transfer/internal/small", checkJwt, async (req, res) => 
 });
 
 // Large internal transfer (5M - 100M VND)
-app.post("/accounts/:id/transfer/internal/large", checkJwt, async (req, res) => {
+app.post("/accounts/:id/transfer/internal/large", checkJwtAndUser, async (req, res) => {
   try {
     const { amount, to_account, description } = req.body;
     const account = db.accounts.findOne(req.params.id);
@@ -441,7 +451,7 @@ app.post("/accounts/:id/transfer/internal/large", checkJwt, async (req, res) => 
 });
 
 // External transfer
-app.post("/accounts/:id/transfer/external", checkJwt, async (req, res) => {
+app.post("/accounts/:id/transfer/external", checkJwtAndUser, async (req, res) => {
   try {
     const { amount, to_bank, to_account, beneficiary_name, description } = req.body;
     const account = db.accounts.findOne(req.params.id);
@@ -495,7 +505,7 @@ app.post("/accounts/:id/transfer/external", checkJwt, async (req, res) => {
 // ==================== ADMINISTRATIVE OPERATIONS ====================
 
 // Freeze account
-app.post("/accounts/:id/freeze", checkJwt, async (req, res) => {
+app.post("/accounts/:id/freeze", checkJwtAndUser, async (req, res) => {
   try {
     const { reason } = req.body;
     const account = db.accounts.findOne(req.params.id);
@@ -537,7 +547,7 @@ app.post("/accounts/:id/freeze", checkJwt, async (req, res) => {
 });
 
 // Close account
-app.post("/accounts/:id/close", checkJwt, async (req, res) => {
+app.post("/accounts/:id/close", checkJwtAndUser, async (req, res) => {
   try {
     const { reason, compliance_clearance } = req.body;
     const account = db.accounts.findOne(req.params.id);
@@ -587,7 +597,7 @@ app.post("/accounts/:id/close", checkJwt, async (req, res) => {
 // ==================== AUDIT AND COMPLIANCE OPERATIONS ====================
 
 // Generate account statement
-app.get("/accounts/:id/statement", checkJwt, async (req, res) => {
+app.get("/accounts/:id/statement", checkJwtAndUser, async (req, res) => {
   try {
     const { start_date, end_date } = req.query;
     const account = db.accounts.findOne(req.params.id);
@@ -642,7 +652,7 @@ app.get("/accounts/:id/statement", checkJwt, async (req, res) => {
 });
 
 // Flag account as suspicious
-app.post("/accounts/:id/flag-suspicious", checkJwt, async (req, res) => {
+app.post("/accounts/:id/flag-suspicious", checkJwtAndUser, async (req, res) => {
   try {
     const { reason, risk_level } = req.body;
     const account = db.accounts.findOne(req.params.id);
@@ -688,7 +698,7 @@ app.post("/accounts/:id/flag-suspicious", checkJwt, async (req, res) => {
 // ==================== LIST AND SEARCH OPERATIONS ====================
 
 // List accounts with authorization filtering
-app.get("/accounts", checkJwt, async (req, res) => {
+app.get("/accounts", checkJwtAndUser, async (req, res) => {
   try {
     const { branch, status, owner_id } = req.query;
     let accounts;
@@ -748,7 +758,7 @@ app.get("/accounts", checkJwt, async (req, res) => {
 // ==================== UTILITY ENDPOINTS FOR TESTING ====================
 
 // Update MFA status (for testing purposes)
-app.post("/users/:id/mfa", checkJwt, async (req, res) => {
+app.post("/users/:id/mfa", checkJwtAndUser, async (req, res) => {
   try {
     const { verified } = req.body;
     const user = db.utils.updateMFA(req.params.id, verified);
@@ -769,7 +779,7 @@ app.post("/users/:id/mfa", checkJwt, async (req, res) => {
 });
 
 // Create supervisor approval (for testing purposes)
-app.post("/accounts/:id/supervisor-approval", checkJwt, async (req, res) => {
+app.post("/accounts/:id/supervisor-approval", checkJwtAndUser, async (req, res) => {
   try {
     const { supervisor_id } = req.body;
     const account = db.utils.createSupervisorApproval(req.params.id, supervisor_id || "SUP001");
@@ -791,7 +801,7 @@ app.post("/accounts/:id/supervisor-approval", checkJwt, async (req, res) => {
 });
 
 // Update fraud score (for testing purposes)
-app.post("/accounts/:id/fraud-score", checkJwt, async (req, res) => {
+app.post("/accounts/:id/fraud-score", checkJwtAndUser, async (req, res) => {
   try {
     const { score } = req.body;
     
