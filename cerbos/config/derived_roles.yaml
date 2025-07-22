@@ -1,0 +1,177 @@
+---
+apiVersion: api.cerbos.dev/v1
+derivedRoles:
+  name: account_roles
+  definitions:
+    # OWNER ROLES
+    - name: verified_owner
+      parentRoles: ['client']
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.resource.attr.ownerId == request.principal.attr.id
+              - expr: request.principal.attr.suspended == false
+              - expr: request.principal.attr.kyc_status == "verified"
+              - expr: request.principal.attr.account_locked == false
+              
+    - name: verified_owner_with_mfa
+      parentRoles: ['client'] 
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.resource.attr.ownerId == request.principal.attr.id
+              - expr: request.principal.attr.suspended == false
+              - expr: request.principal.attr.kyc_status == "verified"
+              - expr: request.principal.attr.mfa_verified == true
+              - expr: request.principal.attr.mfa_timestamp > (now() - duration("15m"))
+              
+    - name: verified_owner_small_transfer
+      parentRoles: ['client']
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.resource.attr.ownerId == request.principal.attr.id
+              - expr: request.principal.attr.suspended == false
+              - expr: request.principal.attr.kyc_status == "verified"
+              - expr: request.resource.attr.amount <= 5000000
+              - expr: request.principal.attr.daily_transfer_used + request.resource.attr.amount <= request.principal.attr.daily_transfer_limit
+              - expr: request.resource.attr.fraud_score < 0.3
+
+    # VIP CLIENT ROLES              
+    - name: vip_client
+      parentRoles: ['client']
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.principal.attr.account_tier == "vip" || request.principal.attr.account_tier == "premium"
+              - expr: request.principal.attr.suspended == false
+              - expr: request.principal.attr.kyc_status == "verified"
+              
+    - name: vip_client_verified
+      parentRoles: ['client']
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.resource.attr.ownerId == request.principal.attr.id
+              - expr: request.principal.attr.account_tier == "vip" || request.principal.attr.account_tier == "premium"  
+              - expr: request.principal.attr.suspended == false
+              - expr: request.principal.attr.kyc_status == "verified"
+              - expr: request.principal.attr.mfa_verified == true
+
+    # TELLER ROLES
+    - name: authorized_teller
+      parentRoles: ['teller']
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.resource.attr.branch_code == request.principal.attr.branch_code
+              - expr: request.principal.attr.suspended == false
+              - expr: request.principal.attr.certification_valid == true
+              - expr: request.principal.attr.dual_control_required == false || request.principal.attr.supervisor_present == true
+              
+    - name: authorized_teller_with_approval
+      parentRoles: ['teller']
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.resource.attr.branch_code == request.principal.attr.branch_code
+              - expr: request.principal.attr.suspended == false
+              - expr: request.principal.attr.certification_valid == true
+              - expr: request.resource.attr.teller_approval_id == request.principal.attr.supervisor_id
+              - expr: request.resource.attr.approval_timestamp > (now() - duration("30m"))
+              
+    - name: authorized_teller_with_kyc
+      parentRoles: ['teller']
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.resource.attr.branch_code == request.principal.attr.branch_code
+              - expr: request.principal.attr.suspended == false
+              - expr: request.principal.attr.kyc_authorization == true
+              - expr: request.principal.attr.certification_valid == true
+              
+    - name: authorized_teller_with_supervisor_approval
+      parentRoles: ['teller'] 
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.resource.attr.branch_code == request.principal.attr.branch_code
+              - expr: request.principal.attr.suspended == false
+              - expr: request.resource.attr.supervisor_approval_id != null
+              - expr: request.resource.attr.supervisor_approval_timestamp > (now() - duration("1h"))
+              - expr: request.resource.attr.approved_by_supervisor == true
+
+    - name: senior_teller
+      parentRoles: ['teller']
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.principal.attr.experience_years >= 3
+              - expr: request.principal.attr.certification_level >= 2
+              - expr: request.principal.attr.suspended == false
+
+    # SUPERVISOR ROLES
+    - name: branch_supervisor
+      parentRoles: ['supervisor']
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.resource.attr.branch_code == request.principal.attr.branch_code
+              - expr: request.principal.attr.suspended == false
+              - expr: request.principal.attr.supervisor_level >= 1
+              
+    - name: branch_supervisor_with_approval  
+      parentRoles: ['supervisor']
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.resource.attr.branch_code == request.principal.attr.branch_code
+              - expr: request.principal.attr.suspended == false  
+              - expr: request.principal.attr.supervisor_level >= 2
+              - expr: request.principal.attr.approval_authority == true
+
+    # COMPLIANCE ROLES
+    - name: compliance_officer_same_branch
+      parentRoles: ['compliance_officer']
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.resource.attr.branch_code == request.principal.attr.branch_code || request.principal.attr.regional_access == true
+              - expr: request.principal.attr.suspended == false
+              - expr: request.principal.attr.compliance_clearance_level >= 2
+
+    # RISK AND FRAUD
+    - name: fraud_analyst_authorized
+      parentRoles: ['fraud_analyst'] 
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.principal.attr.suspended == false
+              - expr: request.principal.attr.fraud_investigation_authority == true
+              - expr: request.resource.attr.flagged_for_review == true
+
+    # EMERGENCY OVERRIDE (highly restricted)
+    - name: emergency_override
+      parentRoles: ['admin', 'senior_management']
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.principal.attr.emergency_access == true
+              - expr: request.resource.attr.emergency_justification != null
+              - expr: request.principal.attr.multi_person_approval == true
+              - expr: request.resource.attr.emergency_timestamp > (now() - duration("2h"))

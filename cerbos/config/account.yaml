@@ -1,0 +1,143 @@
+---
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: "default"
+  importDerivedRoles:
+    - account_roles
+  resource: "account"
+  rules:
+    # READ OPERATIONS
+    - actions: ['read_basic_info']
+      effect: EFFECT_ALLOW
+      roles: ['admin', 'compliance_officer']
+      derivedRoles: ['verified_owner', 'authorized_teller', 'branch_supervisor']
+      
+    - actions: ['read_full_details']
+      effect: EFFECT_ALLOW
+      roles: ['admin', 'compliance_officer']
+      derivedRoles: ['verified_owner_with_mfa', 'authorized_teller_with_approval']
+      
+    - actions: ['read_transaction_history']
+      effect: EFFECT_ALLOW
+      roles: ['admin', 'compliance_officer']
+      derivedRoles: ['verified_owner_with_mfa']
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.principal.attr.mfa_verified == true
+              - expr: request.principal.attr.last_password_change > (now() - duration("90d"))
+
+    # UPDATE OPERATIONS  
+    - actions: ['update_contact_info']
+      effect: EFFECT_ALLOW
+      derivedRoles: ['verified_owner_with_mfa', 'authorized_teller_with_kyc']
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.principal.attr.kyc_verified == true
+              - expr: request.resource.attr.status != "frozen"
+              
+    - actions: ['update_balance_credit']
+      effect: EFFECT_ALLOW
+      roles: ['admin']
+      derivedRoles: ['authorized_teller_with_supervisor_approval']
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.resource.attr.approved_by_supervisor == true
+              - expr: request.principal.attr.dual_approval_required == false || request.resource.attr.secondary_approval == true
+              - expr: request.resource.attr.amount <= request.principal.attr.daily_limit
+              
+    - actions: ['update_balance_debit'] 
+      effect: EFFECT_ALLOW
+      roles: ['admin']
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.resource.attr.approved_by_supervisor == true
+              - expr: request.resource.attr.secondary_approval == true
+              - expr: request.resource.attr.fraud_check_passed == true
+
+    # TRANSFER OPERATIONS
+    - actions: ['transfer_internal_small']
+      effect: EFFECT_ALLOW
+      derivedRoles: ['verified_owner_small_transfer', 'vip_client_verified']
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.resource.attr.amount <= 5000000  # 5M VND
+              - expr: request.principal.attr.daily_transfer_used + request.resource.attr.amount <= request.principal.attr.daily_transfer_limit
+              - expr: request.resource.attr.fraud_score < 0.3
+              
+    - actions: ['transfer_internal_large']
+      effect: EFFECT_ALLOW  
+      derivedRoles: ['verified_owner_with_mfa', 'vip_client_verified']
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.resource.attr.amount > 5000000 && request.resource.attr.amount <= 100000000
+              - expr: request.principal.attr.mfa_verified == true
+              - expr: request.principal.attr.transfer_pin_verified == true
+              - expr: request.resource.attr.fraud_score < 0.2
+              
+    - actions: ['transfer_external']
+      effect: EFFECT_ALLOW
+      derivedRoles: ['verified_owner_with_mfa']
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.principal.attr.mfa_verified == true
+              - expr: request.principal.attr.transfer_pin_verified == true
+              - expr: request.resource.attr.beneficiary_verified == true
+              - expr: request.resource.attr.amount <= request.principal.attr.external_transfer_limit
+              - expr: request.resource.attr.fraud_score < 0.1
+
+    # ADMINISTRATIVE OPERATIONS
+    - actions: ['freeze_account']
+      effect: EFFECT_ALLOW
+      roles: ['admin', 'compliance_officer']
+      derivedRoles: ['branch_supervisor_with_approval']
+      
+    - actions: ['close_account'] 
+      effect: EFFECT_ALLOW
+      roles: ['admin']
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.resource.attr.balance == 0
+              - expr: request.resource.attr.pending_transactions == 0
+              - expr: request.resource.attr.compliance_clearance == true
+              
+    # AUDIT AND COMPLIANCE
+    - actions: ['generate_statement']
+      effect: EFFECT_ALLOW
+      derivedRoles: ['verified_owner', 'authorized_teller', 'compliance_officer_same_branch']
+      
+    - actions: ['flag_suspicious']
+      effect: EFFECT_ALLOW
+      roles: ['compliance_officer', 'fraud_analyst']
+      derivedRoles: ['senior_teller']
+
+    # EXPLICIT DENIALS
+    - actions: ['delete']
+      effect: EFFECT_DENY
+      roles: ['*']
+      
+    - actions: ['*']
+      effect: EFFECT_DENY
+      roles: ['*']  # Thêm dòng này để áp dụng cho mọi role
+      condition:
+        match:
+          any:
+            of:
+              - expr: request.principal.attr.suspended == true
+              - expr: request.resource.attr.status == "closed"
+              - expr: request.resource.attr.regulatory_hold == true
